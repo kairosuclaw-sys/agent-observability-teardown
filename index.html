@@ -1,0 +1,387 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Agent Observability Teardown — See Where Your Workflow Breaks Before You Keep Guessing</title>
+  <meta name="description" content="A practical teardown for teams shipping agent workflows without clear tracing. Review where prompts, retrieval, tools, approvals, and handoffs go dark — then fix the smallest visibility gaps first.">
+  <style>
+    :root {
+      --bg: #08111b;
+      --bg-2: #0f172a;
+      --panel: rgba(10, 20, 36, 0.78);
+      --panel-2: rgba(15, 23, 42, 0.92);
+      --line: rgba(148, 163, 184, 0.2);
+      --text: #edf4ff;
+      --muted: #98a7c2;
+      --accent: #67e8f9;
+      --accent-2: #a78bfa;
+      --accent-3: #34d399;
+      --max: 1140px;
+      --radius: 24px;
+      --shadow: 0 24px 70px rgba(2, 8, 23, 0.42);
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: var(--text);
+      line-height: 1.6;
+      background:
+        radial-gradient(circle at top left, rgba(103,232,249,0.12), transparent 28%),
+        radial-gradient(circle at top right, rgba(167,139,250,0.12), transparent 24%),
+        linear-gradient(180deg, var(--bg) 0%, var(--bg-2) 48%, var(--bg) 100%);
+    }
+    a { color: inherit; }
+    .wrap { width: min(var(--max), calc(100vw - 32px)); margin: 0 auto; }
+    .section { padding: 84px 0; }
+    .section.tight { padding: 56px 0; }
+    .nav {
+      display: flex; justify-content: space-between; align-items: center; gap: 16px;
+      padding: 20px 0 28px; color: var(--muted); font-size: 0.96rem;
+    }
+    .brand { display: flex; align-items: center; gap: 12px; color: var(--text); font-weight: 700; }
+    .mark {
+      width: 38px; height: 38px; border-radius: 12px;
+      background: linear-gradient(135deg, var(--accent), var(--accent-2));
+      box-shadow: 0 12px 30px rgba(103,232,249,0.24);
+      position: relative; overflow: hidden;
+    }
+    .mark::after {
+      content: ""; position: absolute; inset: 1px; border-radius: 11px;
+      background: linear-gradient(180deg, rgba(255,255,255,0.42), rgba(255,255,255,0)); opacity: 0.38;
+    }
+    .nav-links { display: flex; flex-wrap: wrap; gap: 18px; justify-content: flex-end; }
+    .nav-links a { text-decoration: none; color: var(--muted); }
+    .nav-links a:hover, .nav-links a:focus-visible { color: var(--text); }
+    .eyebrow {
+      display: inline-flex; align-items: center; gap: 10px; padding: 7px 12px;
+      border-radius: 999px; border: 1px solid rgba(103,232,249,0.24);
+      background: rgba(103,232,249,0.08); color: var(--accent);
+      font-size: 13px; letter-spacing: .04em; text-transform: uppercase;
+    }
+    .eyebrow::before {
+      content: ""; width: 8px; height: 8px; border-radius: 50%;
+      background: linear-gradient(135deg, var(--accent), var(--accent-2));
+      box-shadow: 0 0 20px rgba(103,232,249,0.45);
+    }
+    h1,h2,h3 { margin: 0; line-height: 1.08; letter-spacing: -0.03em; }
+    h1 { font-size: clamp(2.8rem, 7vw, 5.8rem); max-width: 11ch; }
+    h2 { font-size: clamp(2rem, 4vw, 3.15rem); margin-bottom: 16px; }
+    h3 { font-size: 1.26rem; margin-bottom: 12px; }
+    p { margin: 0 0 16px; color: var(--muted); font-size: 1.04rem; }
+    .lead { font-size: clamp(1.07rem, 1.55vw, 1.24rem); max-width: 720px; }
+    .hero { min-height: 100vh; display: flex; align-items: center; padding: 32px 0 48px; }
+    .hero-grid { display: grid; grid-template-columns: minmax(0, 1.18fr) minmax(320px, 0.88fr); gap: 30px; align-items: center; }
+    .panel, .card, .tier, .faq, .cta-panel {
+      background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+      box-shadow: var(--shadow); backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px);
+    }
+    .panel { padding: 28px; position: relative; overflow: hidden; }
+    .panel::after {
+      content: ""; position: absolute; right: -40px; bottom: -40px; width: 170px; height: 170px; border-radius: 50%;
+      background: radial-gradient(circle, rgba(103,232,249,0.16), transparent 68%);
+    }
+    .divider { height: 1px; margin: 22px 0; background: linear-gradient(90deg, rgba(103,232,249,0.4), rgba(167,139,250,0)); }
+    .list, .check, .plain { list-style: none; margin: 0; padding: 0; }
+    .list li, .check li, .plain li { position: relative; padding-left: 18px; margin-bottom: 12px; color: var(--text); }
+    .list li::before, .check li::before, .plain li::before {
+      content: ""; position: absolute; left: 0; top: .72em; width: 7px; height: 7px; border-radius: 50%;
+      transform: translateY(-50%); background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    }
+    .cta-row { display: flex; flex-wrap: wrap; gap: 14px; margin: 28px 0 18px; }
+    .button {
+      display: inline-flex; align-items: center; justify-content: center; min-height: 50px; padding: 0 18px;
+      border-radius: 14px; text-decoration: none; font-weight: 700; border: 1px solid transparent;
+      transition: transform 160ms ease, border-color 160ms ease, background 160ms ease;
+    }
+    .button:hover, .button:focus-visible { transform: translateY(-1px); }
+    .button.primary { background: linear-gradient(135deg, var(--accent), var(--accent-2)); color: #08111b; }
+    .button.secondary { background: rgba(15, 23, 42, 0.42); border-color: rgba(148,163,184,0.22); color: var(--text); }
+    .micro { font-size: .94rem; max-width: 640px; }
+    .trust {
+      display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 14px; margin-top: 24px;
+    }
+    .trust .card, .grid .card, .buyer .card, .deliverables .card { padding: 22px; }
+    .grid, .buyer, .deliverables { display: grid; gap: 18px; }
+    .grid.three, .buyer, .deliverables { grid-template-columns: repeat(3, minmax(0,1fr)); }
+    .grid.two { grid-template-columns: repeat(2, minmax(0,1fr)); }
+    .kicker { font-size: .8rem; letter-spacing: .08em; text-transform: uppercase; color: var(--accent); margin-bottom: 10px; }
+    .problem {
+      display: grid; grid-template-columns: minmax(0, 1.02fr) minmax(280px, 0.86fr); gap: 18px; align-items: start;
+    }
+    .tier-wrap { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 18px; margin-top: 26px; }
+    .tier { padding: 24px; }
+    .tier.featured { border-color: rgba(103,232,249,0.42); background: linear-gradient(180deg, rgba(103,232,249,0.08), rgba(15,23,42,0.82)); }
+    .price { font-size: 1.55rem; color: var(--text); margin: 8px 0 12px; }
+    .faq-wrap { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 18px; }
+    .faq { padding: 22px; }
+    .cta-panel { padding: 32px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(260px, .72fr); gap: 20px; align-items: center; }
+    .email-box {
+      padding: 18px; border-radius: 18px; background: var(--panel-2); border: 1px solid rgba(148,163,184,0.18);
+    }
+    .footer { padding: 24px 0 44px; color: var(--muted); font-size: .92rem; }
+    @media (max-width: 980px) {
+      .hero-grid, .problem, .cta-panel, .grid.three, .grid.two, .buyer, .deliverables, .tier-wrap, .faq-wrap, .trust {
+        grid-template-columns: 1fr;
+      }
+      .hero { min-height: auto; }
+    }
+    @media (max-width: 640px) {
+      h1 { max-width: 100%; }
+      .wrap { width: min(var(--max), calc(100vw - 20px)); }
+      .section { padding: 68px 0; }
+      .nav { padding-top: 14px; }
+      .panel, .card, .tier, .faq, .cta-panel { border-radius: 20px; }
+      .button { width: 100%; }
+      .cta-row { flex-direction: column; }
+      .nav-links { gap: 12px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <nav class="nav" aria-label="Primary">
+      <div class="brand"><span class="mark" aria-hidden="true"></span><span>Agent Observability Teardown</span></div>
+      <div class="nav-links">
+        <a href="#problem">Problem</a>
+        <a href="#review">What we review</a>
+        <a href="#packages">Packages</a>
+        <a href="#faq">FAQ</a>
+        <a href="#contact">Contact</a>
+      </div>
+    </nav>
+  </div>
+
+  <header class="hero">
+    <div class="wrap hero-grid">
+      <section>
+        <span class="eyebrow">Trace-first reliability review</span>
+        <h1>Your agent may not be unreliable. It may just be unobservable.</h1>
+        <p class="lead">A fast-turn teardown for teams shipping agent workflows without clear tracing. We review where prompts, retrieval, tools, approvals, and handoffs go dark — then show the smallest fixes that make failures diagnosable.</p>
+        <div class="cta-row">
+          <a class="button primary" href="mailto:kairosu.claw@gmail.com?subject=Agent%20Observability%20Teardown">Request the teardown</a>
+          <a class="button secondary" href="#review">See what we review</a>
+        </div>
+        <p class="micro">Built for teams moving from agent demo to production reality. Practical, anti-fluff, and scoped to one workflow first.</p>
+        <div class="trust">
+          <div class="card"><div class="kicker">Best first wedge</div><p>One workflow that “mostly works” but keeps failing in ways nobody can explain cleanly.</p></div>
+          <div class="card"><div class="kicker">Core output</div><p>A failure map, trace-gap review, and instrumentation priority list your team can actually use.</p></div>
+          <div class="card"><div class="kicker">Primary promise</div><p>Stop debugging blind before you spend another week swapping prompts, retries, or models.</p></div>
+        </div>
+      </section>
+      <aside class="panel" aria-label="Audit summary">
+        <div class="kicker">What this is really for</div>
+        <h3>Most teams do not have an agent-intelligence problem first.</h3>
+        <p>They have a <strong style="color:var(--text)">trace visibility problem</strong> that makes every reliability fix feel like guesswork.</p>
+        <div class="divider"></div>
+        <ul class="list">
+          <li>The task timed out, but nobody can localize the failing step.</li>
+          <li>The tool “failed,” but inputs and outputs are not reviewable.</li>
+          <li>Retrieval looked fine, but context state changed invisibly later.</li>
+          <li>Handoffs, retries, and approvals leave too little evidence.</li>
+          <li>The team debates prompts because the workflow leaves no usable trace.</li>
+        </ul>
+      </aside>
+    </div>
+  </header>
+
+  <main>
+    <section id="problem" class="section">
+      <div class="wrap problem">
+        <div>
+          <span class="eyebrow">Problem</span>
+          <h2>Most agent debugging is still expensive guesswork.</h2>
+          <p>When an agent fails in production, teams usually see the symptom long before the cause. The reply was wrong. The task hung. The tool silently failed. The handoff drifted. Retrieval looked off. So the team changes the prompt, swaps the model, or adds another retry.</p>
+          <p>Sometimes that helps. But without clear traces, those fixes are often just smarter-looking guesses.</p>
+          <p>The useful question is not <strong style="color:var(--text)">“Why is our agent bad?”</strong> It is: <strong style="color:var(--text)">Which step failed, what evidence do we have, and what should be visible that currently isn’t?</strong></p>
+        </div>
+        <div class="card" style="padding:24px;">
+          <div class="kicker">Plain-English framing</div>
+          <h3>Before you switch models, trace the step that already breaks.</h3>
+          <ul class="check">
+            <li>Can you reconstruct one bad run after the fact?</li>
+            <li>Can you see the retrieved context used in that run?</li>
+            <li>Are tool inputs, outputs, retries, and escalations visible?</li>
+            <li>Can someone localize the failure in minutes instead of folklore?</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section id="review" class="section tight">
+      <div class="wrap">
+        <span class="eyebrow">What we review</span>
+        <h2>Where the workflow goes dark.</h2>
+        <p class="lead">This is not a generic AI optimization package. It is a practical teardown of where visibility is weak, evidence is missing, and reliability work keeps getting harder than it should.</p>
+        <div class="grid three" style="margin-top:28px;">
+          <article class="card">
+            <div class="kicker">01 · Workflow visibility</div>
+            <h3>Can failures be localized quickly?</h3>
+            <ul class="plain">
+              <li>where the workflow starts and ends</li>
+              <li>which steps are visible vs invisible</li>
+              <li>whether one bad run can be explained cleanly</li>
+            </ul>
+          </article>
+          <article class="card">
+            <div class="kicker">02 · Tool and handoff tracing</div>
+            <h3>Are transitions reviewable?</h3>
+            <ul class="plain">
+              <li>tool-call success and failure visibility</li>
+              <li>missing inputs and outputs in logs</li>
+              <li>ambiguous agent-to-tool or agent-to-agent handoffs</li>
+            </ul>
+          </article>
+          <article class="card">
+            <div class="kicker">03 · Prompt / retrieval inspection</div>
+            <h3>What context did the agent actually have?</h3>
+            <ul class="plain">
+              <li>hidden prompt-state changes</li>
+              <li>missing retrieval evidence</li>
+              <li>places where “model weirdness” is really state opacity</li>
+            </ul>
+          </article>
+          <article class="card">
+            <div class="kicker">04 · Incident reconstruction</div>
+            <h3>Can the team learn from failure?</h3>
+            <ul class="plain">
+              <li>whether incidents are explainable after the fact</li>
+              <li>what evidence is missing for debugging</li>
+              <li>whether logs support repeated improvement</li>
+            </ul>
+          </article>
+          <article class="card">
+            <div class="kicker">05 · Instrumentation priorities</div>
+            <h3>What should you log first?</h3>
+            <ul class="plain">
+              <li>smallest high-value events to add now</li>
+              <li>what can wait for a future dashboard</li>
+              <li>what to stop measuring because it adds noise</li>
+            </ul>
+          </article>
+          <article class="card">
+            <div class="kicker">Best fit buyers</div>
+            <h3>Teams already shipping real workflows.</h3>
+            <ul class="plain">
+              <li>SaaS teams with one customer-facing or internal agent in testing</li>
+              <li>AI consultants delivering workflows to clients</li>
+              <li>internal platform teams supporting multiple agent experiments</li>
+            </ul>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section deliverables">
+      <div class="wrap">
+        <span class="eyebrow">Deliverables</span>
+        <h2>What you get after the teardown.</h2>
+        <div class="deliverables" style="margin-top:28px;">
+          <article class="card"><h3>Teardown memo</h3><p>Where the workflow currently goes dark, with concrete notes instead of abstract AI advice.</p></article>
+          <article class="card"><h3>Failure map</h3><p>The highest-value missing traces across tools, retrieval, prompts, approvals, and handoffs.</p></article>
+          <article class="card"><h3>Instrumentation priorities</h3><p>A practical first-fixes list so the team knows what to log before building bigger dashboards.</p></article>
+        </div>
+      </div>
+    </section>
+
+    <section id="packages" class="section tight">
+      <div class="wrap">
+        <span class="eyebrow">Packages</span>
+        <h2>Start with one workflow, not a giant reliability program.</h2>
+        <p class="lead">The Mini teardown is the best entry point because the fastest revenue path is one painful workflow the team already distrusts.</p>
+        <div class="tier-wrap">
+          <article class="tier featured">
+            <div class="kicker">Entry offer</div>
+            <h3>Agent Observability Teardown Mini</h3>
+            <div class="price">¥7,500–¥15,000</div>
+            <ul class="plain">
+              <li>1 workflow reviewed</li>
+              <li>1 failure path analyzed</li>
+              <li>trace-gap audit</li>
+              <li>first instrumentation fixes</li>
+              <li>72-hour turnaround</li>
+            </ul>
+          </article>
+          <article class="tier">
+            <div class="kicker">Core offer</div>
+            <h3>Agent Observability Teardown</h3>
+            <div class="price">¥35,000–¥85,000</div>
+            <ul class="plain">
+              <li>1–3 workflows or one deeper chain</li>
+              <li>tracing + logging + handoff review</li>
+              <li>prioritized recommendations</li>
+              <li>reliability-focused memo</li>
+            </ul>
+          </article>
+          <article class="tier">
+            <div class="kicker">Upsell</div>
+            <h3>Reliability Review Sprint</h3>
+            <div class="price">Custom</div>
+            <ul class="plain">
+              <li>event taxonomy guidance</li>
+              <li>incident-review design</li>
+              <li>approval visibility map</li>
+              <li>KPI / dashboard starter suggestions</li>
+            </ul>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section buyer">
+      <div class="wrap">
+        <span class="eyebrow">Why buyers care</span>
+        <h2>Reliability gets expensive when evidence is weak.</h2>
+        <div class="buyer" style="margin-top:28px;">
+          <article class="card"><h3>For SaaS teams</h3><p>One customer-facing or internal workflow keeps failing, but the team cannot explain why without a debugging archaeology dig.</p></article>
+          <article class="card"><h3>For consultants / agencies</h3><p>You need a cleaner way to explain reliability gaps and delivery risk than “we’ll keep tuning prompts.”</p></article>
+          <article class="card"><h3>For platform / AI leads</h3><p>Multiple agent experiments are shipping without a shared tracing standard, so every incident becomes bespoke guesswork.</p></article>
+        </div>
+      </div>
+    </section>
+
+    <section id="faq" class="section tight">
+      <div class="wrap">
+        <span class="eyebrow">FAQ</span>
+        <h2>Common questions before a teardown.</h2>
+        <div class="faq-wrap" style="margin-top:28px;">
+          <article class="faq"><h3>Is this a model-evaluation service?</h3><p>No. This is a workflow visibility and failure-diagnosis review. The goal is to show where your system becomes hard to debug, not to benchmark models in isolation.</p></article>
+          <article class="faq"><h3>Do we need a fancy observability stack already?</h3><p>No. This is often most useful before the stack is mature. We can start from traces, screenshots, logs, workflow descriptions, prompts, or sample incidents.</p></article>
+          <article class="faq"><h3>What kinds of agents fit?</h3><p>Internal ops agents, support agents, research agents, multi-step assistants, workflow automations, and tool-using copilots.</p></article>
+          <article class="faq"><h3>What if we only have one messy workflow?</h3><p>That is ideal. The best first teardown is usually one painful workflow the team already distrusts.</p></article>
+        </div>
+      </div>
+    </section>
+
+    <section id="contact" class="section">
+      <div class="wrap cta-panel">
+        <div>
+          <span class="eyebrow">CTA</span>
+          <h2>Before you replace the model, trace the workflow.</h2>
+          <p>If your team has an agent that fails “sometimes,” start by making the failure visible. Send the rough setup, the painful workflow, and one recent incident. The first pass should make debugging real work instead of folklore.</p>
+          <div class="cta-row">
+            <a class="button primary" href="mailto:kairosu.claw@gmail.com?subject=Agent%20Observability%20Teardown">Email to request the teardown</a>
+          </div>
+        </div>
+        <aside class="email-box">
+          <div class="kicker">Best email prompt</div>
+          <p style="color:var(--text); margin-bottom:10px;"><strong>Subject:</strong> Agent Observability Teardown</p>
+          <p>Include:</p>
+          <ul class="plain">
+            <li>the workflow you want reviewed</li>
+            <li>what the agent can access or call</li>
+            <li>the failure you keep struggling to diagnose</li>
+          </ul>
+          <p style="margin-top:14px;"><strong>Email:</strong> <a href="mailto:kairosu.claw@gmail.com">kairosu.claw@gmail.com</a></p>
+        </aside>
+      </div>
+    </section>
+  </main>
+
+  <footer class="wrap footer">
+    Practical teardown for teams shipping real agent workflows — focused on visibility, diagnosability, and the smallest useful fixes first.
+  </footer>
+</body>
+</html>
